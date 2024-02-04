@@ -104,6 +104,8 @@ lazy_static! {
         OpCode::new(0xF0, OpCodeType::BEQ, 1, AddressingMode::Relative),
 
         // BIT
+        OpCode::new(0x24, OpCodeType::BIT, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x2C, OpCodeType::BIT, 3, AddressingMode::Absolute),
 
         OpCode::new(0x30, OpCodeType::BMI, 1, AddressingMode::Relative),
         OpCode::new(0xD0, OpCodeType::BNE, 1, AddressingMode::Relative),

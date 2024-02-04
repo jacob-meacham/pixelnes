@@ -34,23 +34,45 @@ impl StatusFlag {
     }
 }
 
+struct Status {
+    pub val: u8
+}
+
+impl Status {
+    pub fn new() -> Self {
+        Status {
+            val: 0
+        }
+    }
+
+    pub fn set_flag(&mut self, flag: StatusFlag) {
+        self.val |= flag.val()
+    }
+
+    fn update_flag(&mut self, bit: bool, flag: StatusFlag) {
+        if bit {
+            self.set_flag(flag)
+        } else {
+            self.clear_flag(flag)
+        }
+    }
+
+    fn clear_flag(&mut self, flag: StatusFlag) {
+        self.val & !flag.val();
+    }
+
+    fn is_flag_set(&self, flag: StatusFlag) -> bool {
+        return self.val & flag.val() != 0
+    }
+
+    fn get_flag(&self, flag: StatusFlag) -> u8 {
+        return self.val & flag.val()
+    }
+}
+
 // TODO: Make this a type instead? Or mutate?
 // TODO: See if we need to optimize out the fn call
-fn set_flag(status: &mut u8, flag: StatusFlag) {
-    *status = *status | flag.val();
-}
 
-fn clear_flag(status: &mut u8, flag: StatusFlag) {
-    *status = *status & !flag.val();
-}
-
-fn is_flag_set(status: u8, flag: StatusFlag) -> bool {
-    return status & flag.val() != 0
-}
-
-fn get_flag(status: u8, flag: StatusFlag) -> u8 {
-    return status & flag.val()
-}
 
 struct Registers {
     a: u8,
@@ -73,7 +95,7 @@ impl Registers {
 pub struct CPU {
     registers: Registers,
     opcodes: HashMap<u8, &'static OpCode>,
-    status: u8,
+    status: Status,
     pc: u16,
     memory: [u8; 0xFFFF],
     halt_requested: bool
@@ -91,7 +113,7 @@ impl CPU {
         CPU {
             registers: Registers::new(),
             opcodes,
-            status: 0,
+            status: Status::new(),
             pc: 0,
             memory: [0; 0xFFFF],
             halt_requested: false
@@ -152,25 +174,8 @@ impl CPU {
     }
 
     fn set_zero_negative_flags(&mut self, register_val: u8) {
-        if register_val == 0 {
-            set_flag(&mut self.status, StatusFlag::ZERO);
-        } else {
-            clear_flag(&mut self.status, StatusFlag::ZERO)
-        }
-
-        if register_val & 0b1000_0000 != 0 {
-            set_flag(&mut self.status, StatusFlag::NEGATIVE);
-        } else {
-            clear_flag(&mut self.status, StatusFlag::NEGATIVE);
-        }
-    }
-
-    fn update_carry_flag(&mut self, bit: bool) {
-        if bit {
-            set_flag(&mut self.status, StatusFlag::CARRY)
-        } else {
-            clear_flag(&mut self.status, StatusFlag::CARRY)
-        }
+        self.status.update_flag(register_val == 0, StatusFlag::ZERO);
+        self.status.update_flag(register_val & 0b1000_0000 != 0, StatusFlag::NEGATIVE);
     }
 
     fn ld_(&mut self, mode: &AddressingMode, opcode_type: &OpCodeType) {
@@ -220,14 +225,14 @@ impl CPU {
     }
 
     // TODO: Fast enough?
-    fn shift_operation(&mut self, mode: &AddressingMode, op:fn(u8, u8) -> (u8, bool)) {
+    fn shift_operation(&mut self, mode: &AddressingMode, op:fn(u8, &Status) -> (u8, bool)) {
         let val = if mode == &AddressingMode::Accumulator { self.registers.a } else {
             let addr = self.get_address(&mode);
             self.mem_read(addr)
         };
 
-        let (val, carry) = op(val, self.status);
-        self.update_carry_flag(carry);
+        let (val, carry) = op(val, &self.status);
+        self.status.update_flag(carry, StatusFlag::CARRY);
 
         if mode == &AddressingMode::Accumulator {
             self.registers.a = val;
@@ -247,6 +252,15 @@ impl CPU {
             // TODO: Should this be set here?
             self.pc = addr
         }
+    }
+
+    fn bit(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr);
+
+        self.status.update_flag(self.registers.a & val == 0, StatusFlag::ZERO);
+        self.status.update_flag(val & 0b0100_0000 != 0, StatusFlag::OVERFLOW);
+        self.status.update_flag(val & 0b1000_0000 != 0, StatusFlag::NEGATIVE);
     }
 
     pub fn load_program(&mut self, program: Vec<u8>) {
@@ -316,42 +330,45 @@ impl CPU {
             }
 
             // Branch operations
-            OpCodeType::BCC => self.branch(!is_flag_set(self.status, StatusFlag::CARRY)),
-            OpCodeType::BCS => self.branch(is_flag_set(self.status, StatusFlag::CARRY)),
-            OpCodeType::BEQ => self.branch(is_flag_set(self.status, StatusFlag::ZERO)),
-            OpCodeType::BNE => self.branch(!is_flag_set(self.status, StatusFlag::ZERO)),
-            OpCodeType::BMI => self.branch(is_flag_set(self.status, StatusFlag::NEGATIVE)),
-            OpCodeType::BPL => self.branch(!is_flag_set(self.status, StatusFlag::NEGATIVE)),
-            OpCodeType::BVC => self.branch(!is_flag_set(self.status, StatusFlag::OVERFLOW)),
-            OpCodeType::BVS => self.branch(is_flag_set(self.status, StatusFlag::OVERFLOW)),
+            OpCodeType::BCC => self.branch(!self.status.is_flag_set(StatusFlag::CARRY)),
+            OpCodeType::BCS => self.branch(self.status.is_flag_set(StatusFlag::CARRY)),
+            OpCodeType::BEQ => self.branch(self.status.is_flag_set(StatusFlag::ZERO)),
+            OpCodeType::BNE => self.branch(!self.status.is_flag_set(StatusFlag::ZERO)),
+            OpCodeType::BMI => self.branch(self.status.is_flag_set(StatusFlag::NEGATIVE)),
+            OpCodeType::BPL => self.branch(!self.status.is_flag_set(StatusFlag::NEGATIVE)),
+            OpCodeType::BVC => self.branch(!self.status.is_flag_set(StatusFlag::OVERFLOW)),
+            OpCodeType::BVS => self.branch(self.status.is_flag_set(StatusFlag::OVERFLOW)),
 
             // Flag operations
-            OpCodeType::CLC => clear_flag(&mut self.status, StatusFlag::CARRY),
-            OpCodeType::SEC => set_flag(&mut self.status, StatusFlag::CARRY),
-            OpCodeType::CLD => clear_flag(&mut self.status, StatusFlag::DECIMAL),
-            OpCodeType::SED => set_flag(&mut self.status, StatusFlag::DECIMAL),
-            OpCodeType::CLI => clear_flag(&mut self.status, StatusFlag::INTERRUPT),
-            OpCodeType::SEI => set_flag(&mut self.status, StatusFlag::INTERRUPT),
-            OpCodeType::CLV => clear_flag(&mut self.status, StatusFlag::OVERFLOW),
+            OpCodeType::CLC => self.status.clear_flag(StatusFlag::CARRY),
+            OpCodeType::SEC => self.status.set_flag(StatusFlag::CARRY),
+            OpCodeType::CLD => self.status.clear_flag(StatusFlag::DECIMAL),
+            OpCodeType::SED => self.status.set_flag(StatusFlag::DECIMAL),
+            OpCodeType::CLI => self.status.clear_flag(StatusFlag::INTERRUPT),
+            OpCodeType::SEI => self.status.set_flag(StatusFlag::INTERRUPT),
+            OpCodeType::CLV => self.status.clear_flag(StatusFlag::OVERFLOW),
 
             // Shift operations
-            OpCodeType::ASL => self.shift_operation(&opcode.mode, |val: u8, _: u8| {
+            OpCodeType::ASL => self.shift_operation(&opcode.mode, |val: u8, _: &Status| {
                 return (val << 1, val >> 7 == 1);
             }),
-            OpCodeType::LSR => self.shift_operation(&opcode.mode, |val: u8, _: u8| {
+            OpCodeType::LSR => self.shift_operation(&opcode.mode, |val: u8, _: &Status| {
                 return (val >> 1, val & 1 == 1);
             }),
-            OpCodeType::ROL => self.shift_operation(&opcode.mode, |val: u8, status: u8| {
-                return (val << 1 | get_flag(status, StatusFlag::CARRY), val >> 7 == 1);
+            OpCodeType::ROL => self.shift_operation(&opcode.mode, |val: u8, status: &Status| {
+                return (val << 1 | status.get_flag(StatusFlag::CARRY), val >> 7 == 1);
             }),
-            OpCodeType::ROR => self.shift_operation(&opcode.mode, |val: u8, status: u8| {
-                return (val >> 1 | get_flag(status, StatusFlag::CARRY) << 7, val & 1 == 1);
+            OpCodeType::ROR => self.shift_operation(&opcode.mode, |val: u8, status: &Status| {
+                return (val >> 1 | status.get_flag(StatusFlag::CARRY) << 7, val & 1 == 1);
             }),
 
             // Logical operations
             OpCodeType::AND => self.and(&opcode.mode),
             OpCodeType::ORA => self.ora(&opcode.mode),
             OpCodeType::EOR => self.eor(&opcode.mode),
+
+            // Misc operations
+            OpCodeType::BIT => self.bit(&opcode.mode),
 
             // Special
             OpCodeType::BRK => {
@@ -376,8 +393,8 @@ mod test {
         cpu.load_program(vec![0xa9, 0x05, 0x00]);
         cpu.run();
         assert_eq!(cpu.registers.a, 0x05);
-        assert!(!is_flag_set(cpu.status, StatusFlag::ZERO));
-        assert!(!is_flag_set(cpu.status, StatusFlag::NEGATIVE));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
     }
 
     #[test]
@@ -385,6 +402,6 @@ mod test {
         let mut cpu = CPU::new();
         cpu.load_program(vec![0xa9, 0x00, 0x00]);
         cpu.run();
-        assert!(is_flag_set(cpu.status, StatusFlag::ZERO));
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
     }
 }
