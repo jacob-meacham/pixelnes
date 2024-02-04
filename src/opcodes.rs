@@ -98,22 +98,27 @@ lazy_static! {
         OpCode::new(0x0E, OpCodeType::ASL, 3, AddressingMode::Absolute),
         OpCode::new(0x1E, OpCodeType::ASL, 3, AddressingMode::AbsoluteX),
 
-        // BCC
-        // BCS
-        // BEQ
+        // TODO: What do we do with these jumpy ones?
+        OpCode::new(0x90, OpCodeType::BCC, 1, AddressingMode::Relative),
+        OpCode::new(0xB0, OpCodeType::BCS, 1, AddressingMode::Relative),
+        OpCode::new(0xF0, OpCodeType::BEQ, 1, AddressingMode::Relative),
+
         // BIT
-        // BMI
-        // BNE
-        // BPL
+
+        OpCode::new(0x30, OpCodeType::BMI, 1, AddressingMode::Relative),
+        OpCode::new(0xD0, OpCodeType::BNE, 1, AddressingMode::Relative),
+        OpCode::new(0xD0, OpCodeType::BPL, 1, AddressingMode::Relative),
 
         OpCode::new(0x00, OpCodeType::BRK, 1, AddressingMode::Implicit),
 
-        // BVC
-        // BVS
-        // CLC
-        // CLD
-        // CLI
-        // CLV
+        OpCode::new(0x50, OpCodeType::BVC, 1, AddressingMode::Relative),
+        OpCode::new(0x70, OpCodeType::BVS, 1, AddressingMode::Relative),
+
+        OpCode::new(0x18, OpCodeType::CLC, 1, AddressingMode::Implicit),
+        OpCode::new(0xD8, OpCodeType::CLD, 1, AddressingMode::Implicit),
+        OpCode::new(0x58, OpCodeType::CLI, 1, AddressingMode::Implicit),
+        OpCode::new(0xB8, OpCodeType::CLV, 1, AddressingMode::Implicit),
+
         // CMP
         // CPX
         // CPY
@@ -184,9 +189,10 @@ lazy_static! {
         // RTI
         // RTS
         // SBC
-        // SEC
-        // SED
-        // SEI
+
+        OpCode::new(0x38, OpCodeType::SEC, 1, AddressingMode::Implicit),
+        OpCode::new(0xF8, OpCodeType::SED, 1, AddressingMode::Implicit),
+        OpCode::new(0x78, OpCodeType::SEI, 1, AddressingMode::Implicit),
 
         OpCode::new(0x85, OpCodeType::STA, 2, AddressingMode::ZeroPage),
         OpCode::new(0x95, OpCodeType::STA, 2, AddressingMode::ZeroPageX),

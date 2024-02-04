@@ -15,6 +15,7 @@ pub enum AddressingMode {
     IndexedIndirect,
     IndirectIndexed,
     Implicit,
+    Relative,
 }
 
 pub enum StatusFlag {
@@ -33,13 +34,14 @@ impl StatusFlag {
     }
 }
 
+// TODO: Make this a type instead? Or mutate?
 // TODO: See if we need to optimize out the fn call
-fn set_flag(status: u8, flag: StatusFlag) -> u8 {
-    return status | flag.val()
+fn set_flag(status: &mut u8, flag: StatusFlag) {
+    *status = *status | flag.val();
 }
 
-fn clear_flag(status: u8, flag: StatusFlag) -> u8 {
-    return status & !flag.val()
+fn clear_flag(status: &mut u8, flag: StatusFlag) {
+    *status = *status & !flag.val();
 }
 
 fn is_flag_set(status: u8, flag: StatusFlag) -> bool {
@@ -151,23 +153,23 @@ impl CPU {
 
     fn set_zero_negative_flags(&mut self, register_val: u8) {
         if register_val == 0 {
-            self.status = set_flag(self.status, StatusFlag::ZERO);
+            set_flag(&mut self.status, StatusFlag::ZERO);
         } else {
-            self.status = clear_flag(self.status, StatusFlag::ZERO)
+            clear_flag(&mut self.status, StatusFlag::ZERO)
         }
 
         if register_val & 0b1000_0000 != 0 {
-            self.status = set_flag(self.status, StatusFlag::NEGATIVE);
+            set_flag(&mut self.status, StatusFlag::NEGATIVE);
         } else {
-            self.status = clear_flag(self.status, StatusFlag::NEGATIVE);
+            clear_flag(&mut self.status, StatusFlag::NEGATIVE);
         }
     }
 
     fn update_carry_flag(&mut self, bit: bool) {
         if bit {
-            self.status = set_flag(self.status, StatusFlag::CARRY)
+            set_flag(&mut self.status, StatusFlag::CARRY)
         } else {
-            self.status = clear_flag(self.status, StatusFlag::CARRY)
+            clear_flag(&mut self.status, StatusFlag::CARRY)
         }
     }
 
@@ -237,6 +239,16 @@ impl CPU {
         self.set_zero_negative_flags(val);
     }
 
+    fn branch(&mut self, condition: bool) {
+        if condition {
+            let jump = self.mem_read(self.pc);
+            let addr = self.pc.wrapping_add(jump as u16).wrapping_add(1);
+
+            // TODO: Should this be set here?
+            self.pc = addr
+        }
+    }
+
     pub fn load_program(&mut self, program: Vec<u8>) {
         self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
         self.pc = 0x8000;
@@ -267,12 +279,12 @@ impl CPU {
     fn execute(&mut self, opcode: &OpCode) -> u16 {
         // TODO: Should we just pull the address here instead of always passing it in?
         match opcode.opcode_type {
-            // Loads
+            // Load operations
             OpCodeType::LDA | OpCodeType::LDX | OpCodeType::LDY => {
                 self.ld_(&opcode.mode, &opcode.opcode_type);
             }
 
-            // Store
+            // Store operations
             OpCodeType::STA => self.st_(self.registers.a, &opcode.mode),
             OpCodeType::STX => self.st_(self.registers.x, &opcode.mode),
             OpCodeType::STY => self.st_(self.registers.y, &opcode.mode),
@@ -281,7 +293,7 @@ impl CPU {
                 self.set_zero_negative_flags(self.registers.x);
             }
 
-            // Transfer
+            // Transfer operations
             OpCodeType::TAY => {
                 self.registers.y = self.registers.a;
                 self.set_zero_negative_flags(self.registers.y);
@@ -302,6 +314,25 @@ impl CPU {
                 self.registers.a = self.registers.y;
                 self.set_zero_negative_flags(self.registers.a);
             }
+
+            // Branch operations
+            OpCodeType::BCC => self.branch(!is_flag_set(self.status, StatusFlag::CARRY)),
+            OpCodeType::BCS => self.branch(is_flag_set(self.status, StatusFlag::CARRY)),
+            OpCodeType::BEQ => self.branch(is_flag_set(self.status, StatusFlag::ZERO)),
+            OpCodeType::BNE => self.branch(!is_flag_set(self.status, StatusFlag::ZERO)),
+            OpCodeType::BMI => self.branch(is_flag_set(self.status, StatusFlag::NEGATIVE)),
+            OpCodeType::BPL => self.branch(!is_flag_set(self.status, StatusFlag::NEGATIVE)),
+            OpCodeType::BVC => self.branch(!is_flag_set(self.status, StatusFlag::OVERFLOW)),
+            OpCodeType::BVS => self.branch(is_flag_set(self.status, StatusFlag::OVERFLOW)),
+
+            // Flag operations
+            OpCodeType::CLC => clear_flag(&mut self.status, StatusFlag::CARRY),
+            OpCodeType::SEC => set_flag(&mut self.status, StatusFlag::CARRY),
+            OpCodeType::CLD => clear_flag(&mut self.status, StatusFlag::DECIMAL),
+            OpCodeType::SED => set_flag(&mut self.status, StatusFlag::DECIMAL),
+            OpCodeType::CLI => clear_flag(&mut self.status, StatusFlag::INTERRUPT),
+            OpCodeType::SEI => set_flag(&mut self.status, StatusFlag::INTERRUPT),
+            OpCodeType::CLV => clear_flag(&mut self.status, StatusFlag::OVERFLOW),
 
             // Shift operations
             OpCodeType::ASL => self.shift_operation(&opcode.mode, |val: u8, _: u8| {
