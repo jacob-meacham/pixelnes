@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::num::Add;
 use crate::opcodes::{OpCode, OpCodeType, OPCODES};
 
+#[derive(PartialEq, Eq)]
 pub enum AddressingMode {
     Immediate,
+    Accumulator,
     ZeroPage,
     ZeroPageX,
     ZeroPageY,
@@ -43,6 +44,10 @@ fn clear_flag(status: u8, flag: StatusFlag) -> u8 {
 
 fn is_flag_set(status: u8, flag: StatusFlag) -> bool {
     return status & flag.val() != 0
+}
+
+fn get_flag(status: u8, flag: StatusFlag) -> u8 {
+    return status & flag.val()
 }
 
 struct Registers {
@@ -111,11 +116,11 @@ impl CPU {
             AddressingMode::ZeroPage => self.mem_read(self.pc) as u16,
             AddressingMode::ZeroPageX => {
                 let base = self.mem_read(self.pc);
-                base.wrapping_add(self.registers.x) as u16;
+                base.wrapping_add(self.registers.x) as u16
             },
             AddressingMode::ZeroPageY => {
                 let base = self.mem_read(self.pc);
-                base.wrapping_add(self.registers.y) as u16;
+                base.wrapping_add(self.registers.y) as u16
             },
             AddressingMode::Absolute => self.mem_read_u16(self.pc),
             AddressingMode::AbsoluteX => {
@@ -140,9 +145,8 @@ impl CPU {
                 let ptr = self.mem_read_u16(base as u16);
                 ptr.wrapping_add(self.registers.y as u16)
             }
-            AddressingMode::Implicit => panic!("Implicit should not be dereferenced")
+            _ => panic!("Unsupported mode for dereferencing")
         }
-        self.pc
     }
 
     fn set_zero_negative_flags(&mut self, register_val: u8) {
@@ -156,6 +160,14 @@ impl CPU {
             self.status = set_flag(self.status, StatusFlag::NEGATIVE);
         } else {
             self.status = clear_flag(self.status, StatusFlag::NEGATIVE);
+        }
+    }
+
+    fn update_carry_flag(&mut self, bit: bool) {
+        if bit {
+            self.status = set_flag(self.status, StatusFlag::CARRY)
+        } else {
+            self.status = clear_flag(self.status, StatusFlag::CARRY)
         }
     }
 
@@ -205,6 +217,26 @@ impl CPU {
         self.set_zero_negative_flags(self.registers.a);
     }
 
+    // TODO: Fast enough?
+    fn shift_operation(&mut self, mode: &AddressingMode, op:fn(u8, u8) -> (u8, bool)) {
+        let val = if mode == &AddressingMode::Accumulator { self.registers.a } else {
+            let addr = self.get_address(&mode);
+            self.mem_read(addr)
+        };
+
+        let (val, carry) = op(val, self.status);
+        self.update_carry_flag(carry);
+
+        if mode == &AddressingMode::Accumulator {
+            self.registers.a = val;
+        } else {
+            let addr = self.get_address(&mode);
+            self.mem_write(addr, val);
+        }
+
+        self.set_zero_negative_flags(val);
+    }
+
     pub fn load_program(&mut self, program: Vec<u8>) {
         self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
         self.pc = 0x8000;
@@ -233,6 +265,7 @@ impl CPU {
     }
 
     fn execute(&mut self, opcode: &OpCode) -> u16 {
+        // TODO: Should we just pull the address here instead of always passing it in?
         match opcode.opcode_type {
             // Loads
             OpCodeType::LDA | OpCodeType::LDX | OpCodeType::LDY => {
@@ -269,6 +302,20 @@ impl CPU {
                 self.registers.a = self.registers.y;
                 self.set_zero_negative_flags(self.registers.a);
             }
+
+            // Shift operations
+            OpCodeType::ASL => self.shift_operation(&opcode.mode, |val: u8, _: u8| {
+                return (val << 1, val >> 7 == 1);
+            }),
+            OpCodeType::LSR => self.shift_operation(&opcode.mode, |val: u8, _: u8| {
+                return (val >> 1, val & 1 == 1);
+            }),
+            OpCodeType::ROL => self.shift_operation(&opcode.mode, |val: u8, status: u8| {
+                return (val << 1 | get_flag(status, StatusFlag::CARRY), val >> 7 == 1);
+            }),
+            OpCodeType::ROR => self.shift_operation(&opcode.mode, |val: u8, status: u8| {
+                return (val >> 1 | get_flag(status, StatusFlag::CARRY) << 7, val & 1 == 1);
+            }),
 
             // Logical operations
             OpCodeType::AND => self.and(&opcode.mode),

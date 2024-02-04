@@ -81,6 +81,8 @@ impl OpCode {
 lazy_static! {
     pub(crate) static ref OPCODES: Vec<OpCode> = vec![
         // TODO: Can get the num bytes from the type?
+        // ADC
+
         OpCode::new(0x29, OpCodeType::AND, 2, AddressingMode::Immediate),
         OpCode::new(0x25, OpCodeType::AND, 2, AddressingMode::ZeroPage),
         OpCode::new(0x35, OpCodeType::AND, 2, AddressingMode::ZeroPageX),
@@ -90,7 +92,39 @@ lazy_static! {
         OpCode::new(0x21, OpCodeType::AND, 2, AddressingMode::IndexedIndirect),
         OpCode::new(0x31, OpCodeType::AND, 2, AddressingMode::IndirectIndexed),
 
+        OpCode::new(0x0A, OpCodeType::ASL, 1, AddressingMode::Accumulator),
+        OpCode::new(0x06, OpCodeType::ASL, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x16, OpCodeType::ASL, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0x0E, OpCodeType::ASL, 3, AddressingMode::Absolute),
+        OpCode::new(0x1E, OpCodeType::ASL, 3, AddressingMode::AbsoluteX),
+
+        // BCC
+        // BCS
+        // BEQ
+        // BIT
+        // BMI
+        // BNE
+        // BPL
+
         OpCode::new(0x00, OpCodeType::BRK, 1, AddressingMode::Implicit),
+
+        // BVC
+        // BVS
+        // CLC
+        // CLD
+        // CLI
+        // CLV
+        // CMP
+        // CPX
+        // CPY
+        // DEC
+        // DEX
+        // DEY
+        // INC
+        // INX
+        // INY
+        // JMP
+        // JSR
 
         OpCode::new(0xA9, OpCodeType::LDA, 2, AddressingMode::Immediate),
         OpCode::new(0xA5, OpCodeType::LDA, 2, AddressingMode::ZeroPage),
@@ -113,6 +147,12 @@ lazy_static! {
         OpCode::new(0xAC, OpCodeType::LDY, 3, AddressingMode::Absolute),
         OpCode::new(0xBC, OpCodeType::LDY, 3, AddressingMode::AbsoluteX),
 
+        OpCode::new(0x4A, OpCodeType::LSR, 1, AddressingMode::Accumulator),
+        OpCode::new(0x46, OpCodeType::LSR, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x56, OpCodeType::LSR, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0x4E, OpCodeType::LSR, 3, AddressingMode::Absolute),
+        OpCode::new(0x5E, OpCodeType::LSR, 3, AddressingMode::AbsoluteX),
+
         OpCode::new(0xEA, OpCodeType::NOP, 1, AddressingMode::Implicit),
 
         OpCode::new(0x09, OpCodeType::ORA, 2, AddressingMode::Immediate),
@@ -123,6 +163,30 @@ lazy_static! {
         OpCode::new(0x19, OpCodeType::ORA, 3, AddressingMode::AbsoluteY),
         OpCode::new(0x01, OpCodeType::ORA, 2, AddressingMode::IndexedIndirect),
         OpCode::new(0x11, OpCodeType::ORA, 2, AddressingMode::IndirectIndexed),
+
+        // PHA
+        // PHP
+        // PLA
+        // PLP
+
+        OpCode::new(0x2A, OpCodeType::ROL, 1, AddressingMode::Accumulator),
+        OpCode::new(0x26, OpCodeType::ROL, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x36, OpCodeType::ROL, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0x2E, OpCodeType::ROL, 3, AddressingMode::Absolute),
+        OpCode::new(0x3E, OpCodeType::ROL, 3, AddressingMode::AbsoluteX),
+
+        OpCode::new(0x6A, OpCodeType::ROR, 1, AddressingMode::Accumulator),
+        OpCode::new(0x66, OpCodeType::ROR, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x76, OpCodeType::ROR, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0x6E, OpCodeType::ROR, 3, AddressingMode::Absolute),
+        OpCode::new(0x7E, OpCodeType::ROR, 3, AddressingMode::AbsoluteX),
+
+        // RTI
+        // RTS
+        // SBC
+        // SEC
+        // SED
+        // SEI
 
         OpCode::new(0x85, OpCodeType::STA, 2, AddressingMode::ZeroPage),
         OpCode::new(0x95, OpCodeType::STA, 2, AddressingMode::ZeroPageX),
@@ -148,10 +212,3 @@ lazy_static! {
         OpCode::new(0x98, OpCodeType::TYA, 1, AddressingMode::Implicit),
     ];
 }
-
-let r = match opcode_type {
-OpCodeType::STA => { self.registers.a }
-OpCodeType::STX => { self.registers.x }
-OpCodeType::STY => { self.registers.y }
-_ => panic!("Incorrect OpCode")
-};
