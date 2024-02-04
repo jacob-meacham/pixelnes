@@ -81,7 +81,14 @@ impl OpCode {
 lazy_static! {
     pub(crate) static ref OPCODES: Vec<OpCode> = vec![
         // TODO: Can get the num bytes from the type?
-        // ADC
+        OpCode::new(0x69, OpCodeType::ADC, 2, AddressingMode::Immediate),
+        OpCode::new(0x65, OpCodeType::ADC, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x75, OpCodeType::ADC, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0x6D, OpCodeType::ADC, 3, AddressingMode::Absolute),
+        OpCode::new(0x7D, OpCodeType::ADC, 3, AddressingMode::AbsoluteX),
+        OpCode::new(0x79, OpCodeType::ADC, 3, AddressingMode::AbsoluteY),
+        OpCode::new(0x61, OpCodeType::ADC, 2, AddressingMode::IndirectIndexed),
+        OpCode::new(0x71, OpCodeType::ADC, 2, AddressingMode::IndexedIndirect),
 
         OpCode::new(0x29, OpCodeType::AND, 2, AddressingMode::Immediate),
         OpCode::new(0x25, OpCodeType::AND, 2, AddressingMode::ZeroPage),
@@ -103,7 +110,6 @@ lazy_static! {
         OpCode::new(0xB0, OpCodeType::BCS, 1, AddressingMode::Relative),
         OpCode::new(0xF0, OpCodeType::BEQ, 1, AddressingMode::Relative),
 
-        // BIT
         OpCode::new(0x24, OpCodeType::BIT, 2, AddressingMode::ZeroPage),
         OpCode::new(0x2C, OpCodeType::BIT, 3, AddressingMode::Absolute),
 
@@ -190,7 +196,15 @@ lazy_static! {
 
         // RTI
         // RTS
-        // SBC
+
+        OpCode::new(0xE9, OpCodeType::SBC, 2, AddressingMode::Immediate),
+        OpCode::new(0xE5, OpCodeType::SBC, 2, AddressingMode::ZeroPage),
+        OpCode::new(0xF5, OpCodeType::SBC, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0xED, OpCodeType::SBC, 3, AddressingMode::Absolute),
+        OpCode::new(0xFD, OpCodeType::SBC, 3, AddressingMode::AbsoluteX),
+        OpCode::new(0xF9, OpCodeType::SBC, 3, AddressingMode::AbsoluteY),
+        OpCode::new(0xE1, OpCodeType::SBC, 2, AddressingMode::IndirectIndexed),
+        OpCode::new(0xF1, OpCodeType::SBC, 2, AddressingMode::IndexedIndirect),
 
         OpCode::new(0x38, OpCodeType::SEC, 1, AddressingMode::Implicit),
         OpCode::new(0xF8, OpCodeType::SED, 1, AddressingMode::Implicit),

@@ -263,6 +263,40 @@ impl CPU {
         self.status.update_flag(val & 0b1000_0000 != 0, StatusFlag::NEGATIVE);
     }
 
+    fn add_to_accumulator(&mut self, val: u8) {
+        let mut sum = self.registers.a as u16 + val as u16;
+        if self.status.is_flag_set(StatusFlag::CARRY) {
+            sum += 1;
+        }
+
+        self.status.update_flag(sum > 0xFF, StatusFlag::CARRY);
+
+        let result = sum as u8;
+
+        // Check if the value to add and the accumulator have the same sign and the value to add and new value
+        // have different signs
+        let overflow = (val & 0b1000_0000) == (self.registers.a & 0b1000_0000) &&
+            (self.registers.a & 0b1000_0000) != (result & 0b1000_0000);
+        self.status.update_flag(overflow, StatusFlag::OVERFLOW);
+
+        self.registers.a = result;
+        self.set_zero_negative_flags(result);
+    }
+
+    fn adc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr);
+
+        self.add_to_accumulator(val);
+    }
+
+    fn sbc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr) as i8;
+
+        self.add_to_accumulator(val.wrapping_neg().wrapping_add(1) as u8);
+    }
+
     pub fn load_program(&mut self, program: Vec<u8>) {
         self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
         self.pc = 0x8000;
@@ -329,6 +363,10 @@ impl CPU {
                 self.set_zero_negative_flags(self.registers.a);
             }
 
+            // Accumulator operations
+            OpCodeType::ADC => self.adc(&opcode.mode),
+            OpCodeType::SBC => self.sbc(&opcode.mode),
+
             // Branch operations
             OpCodeType::BCC => self.branch(!self.status.is_flag_set(StatusFlag::CARRY)),
             OpCodeType::BCS => self.branch(self.status.is_flag_set(StatusFlag::CARRY)),
@@ -379,6 +417,7 @@ impl CPU {
         }
 
         // TODO: Better or worse with the -1 here?
+        // TODO: Won't work with branches.
         return self.pc + (opcode.len - 1) as u16;
     }
 }
