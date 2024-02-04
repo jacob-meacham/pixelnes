@@ -138,9 +138,23 @@ impl CPU {
         self.registers.sp = self.registers.sp.wrapping_sub(1);
     }
 
+    fn stack_push_u16(&mut self, val: u16) {
+        let hi = (val >> 8) as u8;
+        let lo = (val & 0xff) as u8;
+        self.stack_push(hi);
+        self.stack_push(lo);
+    }
+
     fn stack_pop(&mut self) -> u8 {
         self.registers.sp = self.registers.sp.wrapping_add(1);
         self.mem_read(STACK + self.registers.sp as u16)
+    }
+
+    fn stack_pop_16(&mut self) -> u16 {
+        let lo = self.stack_pop() as u16;
+        let hi = self.stack_pop() as u16;
+
+        hi << 8 | lo
     }
 
     fn get_address(&self, mode: &AddressingMode) -> u16 {
@@ -261,6 +275,14 @@ impl CPU {
             // TODO: Should this be set here?
             self.pc = addr
         }
+    }
+
+    fn compare(&mut self, mode: &AddressingMode, compare_val: u8) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr);
+        self.status.update_flag(compare_val >= val, StatusFlag::CARRY);
+
+        self.set_zero_negative_flags(compare_val.wrapping_sub(val));
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
@@ -386,6 +408,11 @@ impl CPU {
             OpCodeType::BVC => self.branch(!self.status.is_flag_set(StatusFlag::OVERFLOW)),
             OpCodeType::BVS => self.branch(self.status.is_flag_set(StatusFlag::OVERFLOW)),
 
+            // Compare operations
+            OpCodeType::CMP => self.compare(&opcode.mode, self.registers.a),
+            OpCodeType::CPX => self.compare(&opcode.mode, self.registers.x),
+            OpCodeType::CPY => self.compare(&opcode.mode, self.registers.y),
+
             // Flag operations
             OpCodeType::CLC => self.status.clear_flag(StatusFlag::CARRY),
             OpCodeType::SEC => self.status.set_flag(StatusFlag::CARRY),
@@ -409,11 +436,21 @@ impl CPU {
                 return (val >> 1 | status.get_flag(StatusFlag::CARRY) << 7, val & 1 == 1);
             }),
 
-            // Push operations
+            // Push/pull operations
             OpCodeType::PHA => self.stack_push(self.registers.a),
             OpCodeType::PHP => self.stack_push(self.status.val),
             OpCodeType::PLA => self.registers.a = self.stack_pop(),
             OpCodeType::PLP => self.status.val = self.stack_pop(),
+
+            // Return operations
+            OpCodeType::RTI => {
+                self.status.val = self.stack_pop();
+                self.pc = self.stack_pop_u16();
+            }
+
+            OpCodeType::RTS => {
+                self.pc = self.stack_pop_u16() + 1;
+            }
 
             // Logical operations
             OpCodeType::AND => self.and(&opcode.mode),

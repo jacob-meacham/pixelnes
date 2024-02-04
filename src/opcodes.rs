@@ -127,15 +127,31 @@ lazy_static! {
         OpCode::new(0x58, OpCodeType::CLI, 1, AddressingMode::Implicit),
         OpCode::new(0xB8, OpCodeType::CLV, 1, AddressingMode::Implicit),
 
-        // CMP
-        // CPX
-        // CPY
+        OpCode::new(0xC9, OpCodeType::CMP, 2, AddressingMode::Immediate),
+        OpCode::new(0xC5, OpCodeType::CMP, 2, AddressingMode::ZeroPage),
+        OpCode::new(0xD5, OpCodeType::CMP, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0xCD, OpCodeType::CMP, 3, AddressingMode::Absolute),
+        OpCode::new(0xDD, OpCodeType::CMP, 3, AddressingMode::AbsoluteX),
+        OpCode::new(0xD9, OpCodeType::CMP, 3, AddressingMode::AbsoluteY),
+        OpCode::new(0xC1, OpCodeType::CMP, 2, AddressingMode::IndexedIndirect),
+        OpCode::new(0xD1, OpCodeType::CMP, 2, AddressingMode::IndirectIndexed),
+
+        OpCode::new(0xE0, OpCodeType::CPX, 2, AddressingMode::Immediate),
+        OpCode::new(0xE4, OpCodeType::CPX, 2, AddressingMode::ZeroPage),
+        OpCode::new(0xEC, OpCodeType::CPX, 3, AddressingMode::Absolute),
+
+        OpCode::new(0xC0, OpCodeType::CPY, 2, AddressingMode::Immediate),
+        OpCode::new(0xC4, OpCodeType::CPY, 2, AddressingMode::ZeroPage),
+        OpCode::new(0xCC, OpCodeType::CPY, 3, AddressingMode::Absolute),
+
         // DEC
         // DEX
         // DEY
+
         // INC
         // INX
         // INY
+
         // JMP
         // JSR
 
