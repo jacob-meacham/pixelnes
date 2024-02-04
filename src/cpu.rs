@@ -24,8 +24,8 @@ pub enum StatusFlag {
     INTERRUPT = 0b0000_0100,
     DECIMAL = 0b0000_1000,
     BREAK = 0b0001_0000,
-    OVERFLOW = 0b0010_0000,
-    NEGATIVE = 0b0100_0000
+    OVERFLOW = 0b0100_0000,
+    NEGATIVE = 0b1000_0000
 }
 
 impl StatusFlag {
@@ -34,6 +34,7 @@ impl StatusFlag {
     }
 }
 
+#[derive(Clone)]
 struct Status {
     pub val: u8
 }
@@ -41,7 +42,7 @@ struct Status {
 impl Status {
     pub fn new() -> Self {
         Status {
-            val: 0
+            val: 0b0010_0000 // This bit is always set - see https://www.nesdev.org/wiki/Status_flags
         }
     }
 
@@ -129,6 +130,21 @@ impl CPU {
         u16::from_le_bytes(bytes.try_into().unwrap())
     }
 
+    // TODO: Would it be better to only ever change the PC at the end of step or in the loop?
+    fn next_u8(&mut self) -> u8 {
+        let val = self.mem_read(self.pc);
+        self.pc += 1;
+
+        val
+    }
+
+    fn next_u16(&mut self) -> u16 {
+        let val = self.mem_read_u16(self.pc);
+        self.pc += 2;
+
+        val
+    }
+
     fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
     }
@@ -157,38 +173,44 @@ impl CPU {
         hi << 8 | lo
     }
 
-    fn get_address(&self, mode: &AddressingMode) -> u16 {
+    fn consume_address(&mut self, mode: &AddressingMode) -> u16 {
         match mode {
-            AddressingMode::Immediate => self.pc,
-            AddressingMode::ZeroPage => self.mem_read(self.pc) as u16,
+            AddressingMode::Immediate => {
+                let val = self.pc;
+                self.pc += 1;
+
+                val
+            },
+            AddressingMode::ZeroPage => self.next_u8() as u16,
             AddressingMode::ZeroPageX => {
-                let base = self.mem_read(self.pc);
+                let base = self.next_u8();
                 base.wrapping_add(self.registers.x) as u16
             },
             AddressingMode::ZeroPageY => {
-                let base = self.mem_read(self.pc);
+                let base = self.next_u8();
                 base.wrapping_add(self.registers.y) as u16
             },
-            AddressingMode::Absolute => self.mem_read_u16(self.pc),
+            AddressingMode::Absolute => self.next_u16(),
             AddressingMode::AbsoluteX => {
-                let base = self.mem_read_u16(self.pc);
+                let base = self.next_u16();
                 base.wrapping_add(self.registers.x as u16)
             },
             AddressingMode::AbsoluteY => {
-                let base = self.mem_read_u16(self.pc);
+                let base = self.next_u16();
                 base.wrapping_add(self.registers.y as u16)
             },
             AddressingMode::Indirect => {
-                let base = self.mem_read(self.pc);
-                self.mem_read_u16(base as u16)
+                // TODO: Errata in JMP http://wiki.nesdev.com/w/index.php/Errata
+                let base = self.next_u16();
+                self.mem_read_u16(base)
             },
             AddressingMode::IndexedIndirect => {
-                let base = self.mem_read(self.pc);
+                let base = self.next_u8();
                 let ptr = base.wrapping_add(self.registers.x);
                 self.mem_read_u16(ptr as u16)
             },
             AddressingMode::IndirectIndexed => {
-                let base = self.mem_read(self.pc);
+                let base = self.next_u8();
                 let ptr = self.mem_read_u16(base as u16);
                 ptr.wrapping_add(self.registers.y as u16)
             }
@@ -202,9 +224,7 @@ impl CPU {
     }
 
     fn ld_(&mut self, mode: &AddressingMode, opcode_type: &OpCodeType) {
-        // TODO: Should this take in the offset?
-        // TODO: Should figure out who is allowed to update the pc
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let value = self.mem_read(addr);
 
         let r = match opcode_type {
@@ -219,12 +239,12 @@ impl CPU {
     }
 
     fn st_(&mut self, val: u8, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         self.mem_write(addr, val);
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr).wrapping_add(1);
         self.mem_write(addr, val);
 
@@ -244,7 +264,7 @@ impl CPU {
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr).wrapping_sub(1);
         self.mem_write(addr, val);
 
@@ -264,7 +284,7 @@ impl CPU {
     }
 
     fn ora(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr);
 
         self.registers.a |= val;
@@ -272,7 +292,7 @@ impl CPU {
     }
 
     fn and(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr);
 
         self.registers.a &= val;
@@ -280,17 +300,16 @@ impl CPU {
     }
 
     fn eor(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr);
 
         self.registers.a ^= val;
         self.set_zero_negative_flags(self.registers.a);
     }
 
-    // TODO: Fast enough?
     fn shift_operation(&mut self, mode: &AddressingMode, op:fn(u8, &Status) -> (u8, bool)) {
         let val = if mode == &AddressingMode::Accumulator { self.registers.a } else {
-            let addr = self.get_address(&mode);
+            let addr = self.consume_address(&mode);
             self.mem_read(addr)
         };
 
@@ -300,7 +319,7 @@ impl CPU {
         if mode == &AddressingMode::Accumulator {
             self.registers.a = val;
         } else {
-            let addr = self.get_address(&mode);
+            let addr = self.consume_address(&mode);
             self.mem_write(addr, val);
         }
 
@@ -308,17 +327,15 @@ impl CPU {
     }
 
     fn branch(&mut self, condition: bool) {
+        let rel = self.next_u8();
         if condition {
-            let jump = self.mem_read(self.pc);
-            let addr = self.pc.wrapping_add(jump as u16).wrapping_add(1);
-
-            // TODO: Should this be set here?
+            let addr = self.pc.wrapping_add(rel as u16).wrapping_add(1);
             self.pc = addr
         }
     }
 
     fn compare(&mut self, mode: &AddressingMode, compare_val: u8) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr);
         self.status.update_flag(compare_val >= val, StatusFlag::CARRY);
 
@@ -326,7 +343,7 @@ impl CPU {
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr);
 
         self.status.update_flag(self.registers.a & val == 0, StatusFlag::ZERO);
@@ -355,14 +372,14 @@ impl CPU {
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr);
 
         self.add_to_accumulator(val);
     }
 
     fn sbc(&mut self, mode: &AddressingMode) {
-        let addr = self.get_address(&mode);
+        let addr = self.consume_address(&mode);
         let val = self.mem_read(addr) as i8;
 
         self.add_to_accumulator(val.wrapping_neg().wrapping_add(1) as u8);
@@ -383,20 +400,11 @@ impl CPU {
     }
 
     fn step(&mut self) {
-        let code = self.mem_read(self.pc);
-        self.pc += 1; // TODO: Should do this or shouldn't until execute?
+        let code = self.next_u8();
+        let opcode = self.opcodes
+            .get(&code)
+            .expect(&*format!("Unknown instruction found for: 0x{:x}", code));
 
-        let next_pc = if let Some(opcode) = self.opcodes.get(&code) {
-            self.execute(opcode)
-        } else {
-            panic!("Unknown instruction found for: 0x{:x}", code);
-        };
-
-        self.pc = next_pc;
-    }
-
-    fn execute(&mut self, opcode: &OpCode) -> u16 {
-        // TODO: Should we just pull the address here instead of always passing it in?
         match opcode.opcode_type {
             // Load operations
             OpCodeType::LDA | OpCodeType::LDX | OpCodeType::LDY => {
@@ -484,9 +492,27 @@ impl CPU {
 
             // Push/pull operations
             OpCodeType::PHA => self.stack_push(self.registers.a),
-            OpCodeType::PHP => self.stack_push(self.status.val),
+            OpCodeType::PHP => {
+                let mut flags = self.status.clone();
+                flags.set_flag(StatusFlag::BREAK);
+                self.stack_push(flags.val)
+            },
             OpCodeType::PLA => self.registers.a = self.stack_pop(),
-            OpCodeType::PLP => self.status.val = self.stack_pop(),
+            OpCodeType::PLP => {
+                self.status.val = self.stack_pop();
+                self.status.clear_flag(StatusFlag::BREAK);
+            },
+
+            // Jump operations
+            OpCodeType::JMP => {
+                let addr = self.consume_address(&opcode.mode);
+                self.pc = addr
+            }
+            OpCodeType::JSR => {
+                let addr = self.consume_address(&opcode.mode);
+                self.stack_push_u16(self.pc.wrapping_sub(1));
+                self.pc = addr
+            }
 
             // Return operations
             OpCodeType::RTI => {
@@ -495,7 +521,7 @@ impl CPU {
             }
 
             OpCodeType::RTS => {
-                self.pc = self.stack_pop_u16() + 1;
+                self.pc = self.stack_pop_u16().wrapping_add(1);
             }
 
             // Logical operations
@@ -510,13 +536,10 @@ impl CPU {
             OpCodeType::BRK => {
                 self.halt_requested = true;
             }
-            OpCodeType::NOP => { }
-            _ => panic!("Not yet implemented!")
+            OpCodeType::NOP => {
+                // Do nothing
+            }
         }
-
-        // TODO: Better or worse with the -1 here?
-        // TODO: Won't work with branches.
-        return self.pc + (opcode.len - 1) as u16;
     }
 }
 
