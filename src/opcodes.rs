@@ -177,10 +177,10 @@ lazy_static! {
         OpCode::new(0x01, OpCodeType::ORA, 2, AddressingMode::IndexedIndirect),
         OpCode::new(0x11, OpCodeType::ORA, 2, AddressingMode::IndirectIndexed),
 
-        // PHA
-        // PHP
-        // PLA
-        // PLP
+        OpCode::new(0x48, OpCodeType::PHA, 1, AddressingMode::Implicit),
+        OpCode::new(0x08, OpCodeType::PHP, 1, AddressingMode::Implicit),
+        OpCode::new(0x68, OpCodeType::PLA, 1, AddressingMode::Implicit),
+        OpCode::new(0x28, OpCodeType::PLP, 1, AddressingMode::Implicit),
 
         OpCode::new(0x2A, OpCodeType::ROL, 1, AddressingMode::Accumulator),
         OpCode::new(0x26, OpCodeType::ROL, 2, AddressingMode::ZeroPage),

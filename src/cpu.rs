@@ -70,10 +70,6 @@ impl Status {
     }
 }
 
-// TODO: Make this a type instead? Or mutate?
-// TODO: See if we need to optimize out the fn call
-
-
 struct Registers {
     a: u8,
     x: u8,
@@ -81,13 +77,16 @@ struct Registers {
     sp: u8,
 }
 
+const STACK: u16 = 0x0100;
+const STACK_RESET: u8 = 0xfd;
+
 impl Registers {
     pub fn new() -> Self {
         Registers {
             a: 0,
             x: 0,
             y: 0,
-            sp: 0,
+            sp: STACK_RESET,
         }
     }
 }
@@ -132,6 +131,16 @@ impl CPU {
 
     fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
+    }
+
+    fn stack_push(&mut self, val: u8) {
+        self.mem_write(STACK + self.registers.sp as u16, val);
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+    }
+
+    fn stack_pop(&mut self) -> u8 {
+        self.registers.sp = self.registers.sp.wrapping_add(1);
+        self.mem_read(STACK + self.registers.sp as u16)
     }
 
     fn get_address(&self, mode: &AddressingMode) -> u16 {
@@ -399,6 +408,12 @@ impl CPU {
             OpCodeType::ROR => self.shift_operation(&opcode.mode, |val: u8, status: &Status| {
                 return (val >> 1 | status.get_flag(StatusFlag::CARRY) << 7, val & 1 == 1);
             }),
+
+            // Push operations
+            OpCodeType::PHA => self.stack_push(self.registers.a),
+            OpCodeType::PHP => self.stack_push(self.status.val),
+            OpCodeType::PLA => self.registers.a = self.stack_pop(),
+            OpCodeType::PLP => self.status.val = self.stack_pop(),
 
             // Logical operations
             OpCodeType::AND => self.and(&opcode.mode),
