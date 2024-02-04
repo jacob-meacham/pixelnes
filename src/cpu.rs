@@ -58,7 +58,7 @@ impl Status {
     }
 
     fn clear_flag(&mut self, flag: StatusFlag) {
-        self.val & !flag.val();
+        self.val &= !flag.val();
     }
 
     fn is_flag_set(&self, flag: StatusFlag) -> bool {
@@ -150,7 +150,7 @@ impl CPU {
         self.mem_read(STACK + self.registers.sp as u16)
     }
 
-    fn stack_pop_16(&mut self) -> u16 {
+    fn stack_pop_u16(&mut self) -> u16 {
         let lo = self.stack_pop() as u16;
         let hi = self.stack_pop() as u16;
 
@@ -221,6 +221,46 @@ impl CPU {
     fn st_(&mut self, val: u8, mode: &AddressingMode) {
         let addr = self.get_address(&mode);
         self.mem_write(addr, val);
+    }
+
+    fn inc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr).wrapping_add(1);
+        self.mem_write(addr, val);
+
+        self.set_zero_negative_flags(val)
+    }
+
+    fn in_(&mut self, opcode_type: &OpCodeType) {
+        let r = match opcode_type {
+            OpCodeType::INX => { &mut self.registers.x }
+            OpCodeType::INY => { &mut self.registers.y }
+            _ => panic!("Incorrect Opcode")
+        };
+        let val = r.wrapping_add(1);
+        *r = val;
+
+        self.set_zero_negative_flags(val);
+    }
+
+    fn dec(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr).wrapping_sub(1);
+        self.mem_write(addr, val);
+
+        self.set_zero_negative_flags(val)
+    }
+
+    fn de_(&mut self, opcode_type: &OpCodeType) {
+        let r = match opcode_type {
+            OpCodeType::DEX => { &mut self.registers.x }
+            OpCodeType::DEY => { &mut self.registers.y }
+            _ => panic!("Incorrect Opcode")
+        };
+        let val = r.wrapping_sub(1);
+        *r = val;
+
+        self.set_zero_negative_flags(val);
     }
 
     fn ora(&mut self, mode: &AddressingMode) {
@@ -397,6 +437,12 @@ impl CPU {
             // Accumulator operations
             OpCodeType::ADC => self.adc(&opcode.mode),
             OpCodeType::SBC => self.sbc(&opcode.mode),
+
+            // Inc/Dec operations
+            OpCodeType::INC => self.inc(&opcode.mode),
+            OpCodeType::INX | OpCodeType::INY => self.in_(&opcode.opcode_type),
+            OpCodeType::DEC => self.dec(&opcode.mode),
+            OpCodeType::DEX | OpCodeType::DEY => self.de_(&opcode.opcode_type),
 
             // Branch operations
             OpCodeType::BCC => self.branch(!self.status.is_flag_set(StatusFlag::CARRY)),

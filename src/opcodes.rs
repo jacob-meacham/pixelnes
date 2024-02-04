@@ -144,13 +144,30 @@ lazy_static! {
         OpCode::new(0xC4, OpCodeType::CPY, 2, AddressingMode::ZeroPage),
         OpCode::new(0xCC, OpCodeType::CPY, 3, AddressingMode::Absolute),
 
-        // DEC
-        // DEX
-        // DEY
+        OpCode::new(0xC6, OpCodeType::DEC, 2, AddressingMode::ZeroPage),
+        OpCode::new(0xD6, OpCodeType::DEC, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0xCE, OpCodeType::DEC, 3, AddressingMode::Absolute),
+        OpCode::new(0xDE, OpCodeType::DEC, 3, AddressingMode::AbsoluteX),
 
-        // INC
-        // INX
-        // INY
+        OpCode::new(0xCA, OpCodeType::DEX, 1, AddressingMode::Implicit),
+        OpCode::new(0x88, OpCodeType::DEY, 1, AddressingMode::Implicit),
+
+        OpCode::new(0x49, OpCodeType::EOR, 2, AddressingMode::Immediate),
+        OpCode::new(0x45, OpCodeType::EOR, 2, AddressingMode::ZeroPage),
+        OpCode::new(0x55, OpCodeType::EOR, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0x4D, OpCodeType::EOR, 3, AddressingMode::Absolute),
+        OpCode::new(0x5D, OpCodeType::EOR, 3, AddressingMode::AbsoluteX),
+        OpCode::new(0x59, OpCodeType::EOR, 3, AddressingMode::AbsoluteY),
+        OpCode::new(0x41, OpCodeType::EOR, 2, AddressingMode::IndexedIndirect),
+        OpCode::new(0x51, OpCodeType::EOR, 2, AddressingMode::IndirectIndexed),
+
+        OpCode::new(0xE6, OpCodeType::INC, 2, AddressingMode::ZeroPage),
+        OpCode::new(0xF6, OpCodeType::INC, 2, AddressingMode::ZeroPageX),
+        OpCode::new(0xEE, OpCodeType::INC, 3, AddressingMode::Absolute),
+        OpCode::new(0xFE, OpCodeType::INC, 3, AddressingMode::AbsoluteX),
+
+        OpCode::new(0xE8, OpCodeType::INX, 1, AddressingMode::Implicit),
+        OpCode::new(0xC8, OpCodeType::INY, 1, AddressingMode::Implicit),
 
         // JMP
         // JSR
