@@ -126,7 +126,7 @@ impl CPU {
     }
 
     fn mem_read_u16(&self, addr: u16) -> u16 {
-        let (bytes, _) = self.memory.split_at(addr as usize);
+        let bytes = &self.memory[addr as usize..addr as usize + 2];
         u16::from_le_bytes(bytes.try_into().unwrap())
     }
 
@@ -147,6 +147,12 @@ impl CPU {
 
     fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
+    }
+
+    fn mem_write_u16(&mut self, addr: u16, data: u16) {
+        let [b1, b2] = u16::to_le_bytes(data);
+        self.memory[addr as usize] = b1;
+        self.memory[(addr + 1) as usize] = b2;
     }
 
     fn stack_push(&mut self, val: u8) {
@@ -385,9 +391,16 @@ impl CPU {
         self.add_to_accumulator(val.wrapping_neg().wrapping_add(1) as u8);
     }
 
+    pub fn reset(&mut self) {
+        self.registers = Registers::new();
+        self.status = Status::new();
+        self.pc = self.mem_read_u16(0xFFFC);
+    }
+
     pub fn load_program(&mut self, program: Vec<u8>) {
         self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
-        self.pc = 0x8000;
+        self.mem_write_u16(0xFFFC, 0x8000);
+        self.reset();
     }
 
     pub fn run(&mut self) {
@@ -548,6 +561,77 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_mem_read() {
+        let mut cpu = CPU::new();
+
+        cpu.memory[0x1234] = 0xAB;
+        assert_eq!(cpu.mem_read(0x1234), 0xAB);
+    }
+
+    #[test]
+    fn test_mem_write() {
+        let mut cpu = CPU::new();
+
+        cpu.mem_write(0x1234, 0xCD);
+        assert_eq!(cpu.memory[0x1234], 0xCD);
+    }
+
+    #[test]
+    fn test_set_zero_negative_flags() {
+        let mut cpu = CPU::new();
+
+        cpu.set_zero_negative_flags(0);
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.set_zero_negative_flags(128);
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_stack_push_pop() {
+        let mut cpu = CPU::new();
+
+        cpu.stack_push(123);
+        assert_eq!(cpu.stack_pop(), 123);
+    }
+
+    #[test]
+    fn test_stack_push_pop_u16() {
+        let mut cpu = CPU::new();
+
+        cpu.stack_push_u16(0xFFAA);
+        assert_eq!(cpu.stack_pop_u16(), 0xFFAA);
+    }
+
+    #[test]
+    fn test_ld_() {
+        let test_cases = vec![
+            &OpCodeType::LDA,
+            &OpCodeType::LDX,
+            &OpCodeType::LDY,
+        ];
+
+
+        for typ in test_cases {
+            let mut cpu = CPU::new();
+            cpu.load_program(vec![0x05, 0x00]);
+            cpu.ld_(&AddressingMode::Immediate, typ);
+
+            assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+            assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+            match typ {
+                OpCodeType::LDA => assert_eq!(cpu.registers.a, 0x05),
+                OpCodeType::LDX => assert_eq!(cpu.registers.x, 0x05),
+                OpCodeType::LDY => assert_eq!(cpu.registers.y, 0x05),
+                _ => panic!("Unknown opcode")
+            }
+        }
+    }
+
+    #[test]
     fn test_0xa9_lda_immediate_load_data() {
         let mut cpu = CPU::new();
         cpu.load_program(vec![0xa9, 0x05, 0x00]);
@@ -563,5 +647,40 @@ mod test {
         cpu.load_program(vec![0xa9, 0x00, 0x00]);
         cpu.run();
         assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_ld_incorrect_opcode() {
+        let mut cpu = CPU::new();
+        cpu.load_program(vec![0x05, 0x00]);
+        cpu.ld_(&AddressingMode::Immediate, &OpCodeType::ORA);
+    }
+
+    #[test]
+    fn test_st() {
+        let mut cpu = CPU::new();
+        cpu.pc = 10;
+        cpu.memory[10] = 0x12;
+        cpu.st_(0xaa, &AddressingMode::Immediate);
+        assert_eq!(cpu.memory[10], 0xaa);
+    }
+
+    #[test]
+    fn test_inc() {
+        let mut cpu = CPU::new();
+        cpu.pc = 10;
+        cpu.memory[10] = 0x12;
+        cpu.inc(&AddressingMode::Immediate);
+        assert_eq!(cpu.memory[10], 0x13);
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.pc = 10;
+        cpu.memory[10] = 0xff;
+        cpu.inc(&AddressingMode::Immediate);
+        assert_eq!(cpu.memory[10], 0);
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
     }
 }
