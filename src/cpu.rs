@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::Add;
 use crate::opcodes::{OpCode, OpCodeType, OPCODES};
 
 pub enum AddressingMode {
@@ -9,9 +10,10 @@ pub enum AddressingMode {
     Absolute,
     AbsoluteX,
     AbsoluteY,
-    IndirectX,
-    IndirectY,
-    None,
+    Indirect,
+    IndexedIndirect,
+    IndirectIndexed,
+    Implicit,
 }
 
 pub enum StatusFlag {
@@ -89,15 +91,57 @@ impl CPU {
         }
     }
 
+    // TODO: Move this to its own struct
     fn mem_read(&self, addr: u16) -> u8 {
         self.memory[addr as usize]
+    }
+
+    fn mem_read_u16(&self, addr: u16) -> u16 {
+        let (bytes, _) = self.memory.split_at(addr as usize);
+        u16::from_le_bytes(bytes.try_into().unwrap())
     }
 
     fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
     }
 
-    fn get_address(&self, _mode: &AddressingMode) -> u16 {
+    fn get_address(&self, mode: &AddressingMode) -> u16 {
+        match mode {
+            AddressingMode::Immediate => self.pc,
+            AddressingMode::ZeroPage => self.mem_read(self.pc) as u16,
+            AddressingMode::ZeroPageX => {
+                let base = self.mem_read(self.pc);
+                base.wrapping_add(self.registers.x) as u16;
+            },
+            AddressingMode::ZeroPageY => {
+                let base = self.mem_read(self.pc);
+                base.wrapping_add(self.registers.y) as u16;
+            },
+            AddressingMode::Absolute => self.mem_read_u16(self.pc),
+            AddressingMode::AbsoluteX => {
+                let base = self.mem_read_u16(self.pc);
+                base.wrapping_add(self.registers.x as u16)
+            },
+            AddressingMode::AbsoluteY => {
+                let base = self.mem_read_u16(self.pc);
+                base.wrapping_add(self.registers.y as u16)
+            },
+            AddressingMode::Indirect => {
+                let base = self.mem_read(self.pc);
+                self.mem_read_u16(base as u16)
+            },
+            AddressingMode::IndexedIndirect => {
+                let base = self.mem_read(self.pc);
+                let ptr = base.wrapping_add(self.registers.x);
+                self.mem_read_u16(ptr as u16)
+            },
+            AddressingMode::IndirectIndexed => {
+                let base = self.mem_read(self.pc);
+                let ptr = self.mem_read_u16(base as u16);
+                ptr.wrapping_add(self.registers.y as u16)
+            }
+            AddressingMode::Implicit => panic!("Implicit should not be dereferenced")
+        }
         self.pc
     }
 
@@ -115,30 +159,7 @@ impl CPU {
         }
     }
 
-    // I'm not good enough at Rust to figure out a better way to do this,
-    // but this feels as clean to me as possible and the unsafe is OK because
-    // we will not be multithreading
-    // fn load(&mut self, param: u8, register: *mut u8) {
-    //     unsafe {
-    //         *register = param;
-    //         self.set_zero_negative_flags(*register);
-    //     }
-    // }
-    //
-    // fn load(&mut self, mode: &AddressingMode, register: *mut u8) {
-    //     let (addr, page_cross) = self.get_operand_address(&mode);
-    //     let value = self.mem_read(addr);
-    //     unsafe {
-    //         *register = value;
-    //         self.set_zero_negative_flags(*register);
-    //     }
-    //
-    //     if page_cross {
-    //         self.bus.tick(1);
-    //     }
-    // }
-
-    fn ld(&mut self, mode: &AddressingMode, opcode_type: &OpCodeType) {
+    fn ld_(&mut self, mode: &AddressingMode, opcode_type: &OpCodeType) {
         // TODO: Should this take in the offset?
         // TODO: Should figure out who is allowed to update the pc
         let addr = self.get_address(&mode);
@@ -153,6 +174,35 @@ impl CPU {
         *r = value;
 
         self.set_zero_negative_flags(value);
+    }
+
+    fn st_(&mut self, val: u8, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        self.mem_write(addr, val);
+    }
+
+    fn ora(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr);
+
+        self.registers.a |= val;
+        self.set_zero_negative_flags(self.registers.a);
+    }
+
+    fn and(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr);
+
+        self.registers.a &= val;
+        self.set_zero_negative_flags(self.registers.a);
+    }
+
+    fn eor(&mut self, mode: &AddressingMode) {
+        let addr = self.get_address(&mode);
+        let val = self.mem_read(addr);
+
+        self.registers.a ^= val;
+        self.set_zero_negative_flags(self.registers.a);
     }
 
     pub fn load_program(&mut self, program: Vec<u8>) {
@@ -184,13 +234,21 @@ impl CPU {
 
     fn execute(&mut self, opcode: &OpCode) -> u16 {
         match opcode.opcode_type {
+            // Loads
             OpCodeType::LDA | OpCodeType::LDX | OpCodeType::LDY => {
-                self.ld(&opcode.mode, &opcode.opcode_type);
+                self.ld_(&opcode.mode, &opcode.opcode_type);
             }
+
+            // Store
+            OpCodeType::STA => self.st_(self.registers.a, &opcode.mode),
+            OpCodeType::STX => self.st_(self.registers.x, &opcode.mode),
+            OpCodeType::STY => self.st_(self.registers.y, &opcode.mode),
             OpCodeType::TAX => {
                 self.registers.x = self.registers.y;
                 self.set_zero_negative_flags(self.registers.x);
             }
+
+            // Transfer
             OpCodeType::TAY => {
                 self.registers.y = self.registers.a;
                 self.set_zero_negative_flags(self.registers.y);
@@ -205,15 +263,24 @@ impl CPU {
             }
             OpCodeType::TXS => {
                 self.registers.sp = self.registers.x;
-                self.set_zero_negative_flags(self.registers.sp);
+                // Doesn't impact flags
             }
             OpCodeType::TYA => {
                 self.registers.a = self.registers.y;
                 self.set_zero_negative_flags(self.registers.a);
             }
+
+            // Logical operations
+            OpCodeType::AND => self.and(&opcode.mode),
+            OpCodeType::ORA => self.ora(&opcode.mode),
+            OpCodeType::EOR => self.eor(&opcode.mode),
+
+            // Special
             OpCodeType::BRK => {
                 self.halt_requested = true;
             }
+            OpCodeType::NOP => { }
+            _ => panic!("Not yet implemented!")
         }
 
         // TODO: Better or worse with the -1 here?
