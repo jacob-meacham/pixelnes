@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use crate::opcodes::{OpCode, OpCodeType, OPCODES};
 
+// TODO: Should functions be responsible for consuming their operand? More state in the functions then
+// TODO: Should get_address be separated from the consume? Then we'd need to peel out the next_u8/u16 from consume_address and have another match case...
+
 #[derive(PartialEq, Eq)]
 pub enum AddressingMode {
     Immediate,
@@ -314,9 +317,9 @@ impl CPU {
     }
 
     fn shift_operation(&mut self, mode: &AddressingMode, op:fn(u8, &Status) -> (u8, bool)) {
-        let val = if mode == &AddressingMode::Accumulator { self.registers.a } else {
+        let (val, addr) = if mode == &AddressingMode::Accumulator { (self.registers.a, None) } else {
             let addr = self.consume_address(&mode);
-            self.mem_read(addr)
+            (self.mem_read(addr), Some(addr))
         };
 
         let (val, carry) = op(val, &self.status);
@@ -325,8 +328,7 @@ impl CPU {
         if mode == &AddressingMode::Accumulator {
             self.registers.a = val;
         } else {
-            let addr = self.consume_address(&mode);
-            self.mem_write(addr, val);
+            self.mem_write(addr.unwrap(), val);
         }
 
         self.set_zero_negative_flags(val);
@@ -335,7 +337,7 @@ impl CPU {
     fn branch(&mut self, condition: bool) {
         let rel = self.next_u8();
         if condition {
-            let addr = self.pc.wrapping_add(rel as u16).wrapping_add(1);
+            let addr = self.pc.wrapping_add(rel as u16);
             self.pc = addr
         }
     }
@@ -606,6 +608,126 @@ mod test {
     }
 
     #[test]
+    fn test_consume_address_immediate() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        let addr = cpu.consume_address(&AddressingMode::Immediate);
+        assert_eq!(addr, 0x400);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
+    fn test_consume_address_zero_page() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.memory[0x400] = 0x10;
+        let addr = cpu.consume_address(&AddressingMode::ZeroPage);
+
+        assert_eq!(addr, 0x10);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
+    fn test_consume_address_zero_page_x() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.memory[0x400] = 0x10;
+        cpu.registers.x = 0x05;
+
+        let addr = cpu.consume_address(&AddressingMode::ZeroPageX);
+        assert_eq!(addr, 0x15);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
+    fn test_consume_address_zero_page_y() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.memory[0x400] = 0x10;
+        cpu.registers.y = 0x07;
+
+        let addr = cpu.consume_address(&AddressingMode::ZeroPageY);
+        assert_eq!(addr, 0x17);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
+    fn test_consume_address_absolute() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.memory[0x400] = 0x10;
+        cpu.memory[0x401] = 0x2a;
+
+        let addr = cpu.consume_address(&AddressingMode::Absolute);
+        assert_eq!(addr, 0x2a10);
+        assert_eq!(cpu.pc, 0x402);
+    }
+
+    #[test]
+    fn test_consume_address_absolute_x() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.memory[0x400] = 0x10;
+        cpu.memory[0x401] = 0x2a;
+        cpu.registers.x = 0x05;
+
+        let addr = cpu.consume_address(&AddressingMode::AbsoluteX);
+        assert_eq!(addr, 0x2a15);
+        assert_eq!(cpu.pc, 0x402);
+    }
+
+    #[test]
+    fn test_consume_address_absolute_y() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.memory[0x400] = 0x10;
+        cpu.memory[0x401] = 0x2a;
+        cpu.registers.y = 0x07;
+
+        let addr = cpu.consume_address(&AddressingMode::AbsoluteY);
+        assert_eq!(addr, 0x2a17);
+        assert_eq!(cpu.pc, 0x402);
+    }
+
+    #[test]
+    fn test_consume_address_indirect() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.mem_write_u16(0x400, 0x102a);
+        cpu.mem_write_u16(0x102a, 0xf11a);
+
+        let addr = cpu.consume_address(&AddressingMode::Indirect);
+        assert_eq!(addr, 0xf11a);
+        assert_eq!(cpu.pc, 0x402);
+    }
+
+    #[test]
+    fn test_consume_address_indexed_indirect() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.registers.x = 0x11;
+        cpu.memory[0x400] = 0x2a;
+        cpu.mem_write_u16(0x2a + 0x11, 0xfaff);
+
+        let addr = cpu.consume_address(&AddressingMode::IndexedIndirect);
+        assert_eq!(addr, 0xfaff);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
+    fn test_consume_address_indirect_indexed() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0x400;
+        cpu.registers.y = 0x11;
+        cpu.memory[0x400] = 0x2a;
+        cpu.mem_write_u16(0x2a, 0xfaff);
+
+        let addr = cpu.consume_address(&AddressingMode::IndirectIndexed);
+        assert_eq!(addr, 0xfaff + 0x11);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
     fn test_ld_() {
         let test_cases = vec![
             &OpCodeType::LDA,
@@ -660,27 +782,321 @@ mod test {
     #[test]
     fn test_st() {
         let mut cpu = CPU::new();
-        cpu.pc = 10;
-        cpu.memory[10] = 0x12;
+        cpu.pc = 0xab;
+        cpu.memory[0xab] = 0x12;
         cpu.st_(0xaa, &AddressingMode::Immediate);
-        assert_eq!(cpu.memory[10], 0xaa);
+        assert_eq!(cpu.memory[0xab], 0xaa);
     }
 
     #[test]
     fn test_inc() {
         let mut cpu = CPU::new();
-        cpu.pc = 10;
-        cpu.memory[10] = 0x12;
+        cpu.pc = 0xab;
+        cpu.memory[0xab] = 0x12;
         cpu.inc(&AddressingMode::Immediate);
-        assert_eq!(cpu.memory[10], 0x13);
+        assert_eq!(cpu.memory[0xab], 0x13);
         assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
         assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
 
-        cpu.pc = 10;
-        cpu.memory[10] = 0xff;
+        cpu.pc = 0xab;
+        cpu.memory[0xab] = 0xff;
         cpu.inc(&AddressingMode::Immediate);
-        assert_eq!(cpu.memory[10], 0);
+        assert_eq!(cpu.memory[0xab], 0);
         assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
         assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_in_() {
+        let test_cases = vec![
+            &OpCodeType::INX,
+            &OpCodeType::INY,
+        ];
+
+
+        for typ in test_cases {
+            let mut cpu = CPU::new();
+            cpu.registers.x = 0x05;
+            cpu.registers.y = 0x05;
+            cpu.in_(typ);
+
+            assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+            assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+            match typ {
+                OpCodeType::INX => assert_eq!(cpu.registers.x, 0x06),
+                OpCodeType::INY => assert_eq!(cpu.registers.y, 0x06),
+                _ => panic!("Unknown opcode")
+            }
+        }
+    }
+
+    #[test]
+    fn test_dec() {
+        let mut cpu = CPU::new();
+        cpu.pc = 0xab;
+        cpu.memory[0xab] = 0x12;
+        cpu.dec(&AddressingMode::Immediate);
+        assert_eq!(cpu.memory[0xab], 0x11);
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.pc = 0xab;
+        cpu.memory[0xab] = 0x01;
+        cpu.dec(&AddressingMode::Immediate);
+        assert_eq!(cpu.memory[0xab], 0x00);
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_de_() {
+        let test_cases = vec![
+            &OpCodeType::DEX,
+            &OpCodeType::DEY,
+        ];
+
+
+        for typ in test_cases {
+            let mut cpu = CPU::new();
+            cpu.registers.x = 0x05;
+            cpu.registers.y = 0x05;
+            cpu.de_(typ);
+
+            assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+            assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+            match typ {
+                OpCodeType::DEX => assert_eq!(cpu.registers.x, 0x04),
+                OpCodeType::DEY => assert_eq!(cpu.registers.y, 0x04),
+                _ => panic!("Unknown opcode")
+            }
+        }
+    }
+
+    #[test]
+    fn test_ora() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0b1010_1010;
+        cpu.memory[0xab] = 0b0101_0101;
+        cpu.pc = 0xab;
+
+        cpu.ora(&AddressingMode::Immediate);
+        assert_eq!(cpu.registers.a, 0b1111_1111);
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_and() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0b1010_1010;
+        cpu.memory[0xab] = 0b0101_0101;
+        cpu.pc = 0xab;
+
+        cpu.and(&AddressingMode::Immediate);
+        assert_eq!(cpu.registers.a, 0b0000_0000);
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_eor() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0b1010_1010;
+        cpu.memory[0xab] = 0b1101_1010;
+        cpu.pc = 0xab;
+
+        cpu.eor(&AddressingMode::Immediate);
+        assert_eq!(cpu.registers.a, 0b0111_0000);
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_shift_operation() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0x0a;
+
+        cpu.shift_operation(&AddressingMode::Accumulator, |val: u8, _: &Status| -> (u8, bool) {
+            assert_eq!(val, 0x0a);
+
+            (0x1a, true)
+        });
+
+        assert_eq!(cpu.registers.a, 0x1a);
+
+        assert!(cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.memory[0xab] = 0x0a;
+        cpu.pc = 0xab;
+
+        cpu.shift_operation(&AddressingMode::Immediate, |val: u8, _: &Status| -> (u8, bool) {
+            assert_eq!(val, 0x0a);
+
+            (0x00, false)
+        });
+
+        assert_eq!(cpu.memory[0xab], 0x00);
+        assert!(!cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_branch() {
+        let mut cpu = CPU::new();
+        cpu.memory[0x400] = 0x20;
+        cpu.pc = 0x400;
+        cpu.branch(true);
+        assert_eq!(cpu.pc, 0x421);
+
+        cpu.pc = 0x400;
+        cpu.branch(false);
+        assert_eq!(cpu.pc, 0x401);
+    }
+
+    #[test]
+    fn test_compare() {
+        let mut cpu = CPU::new();
+        cpu.memory[0x200] = 0x80;
+        cpu.pc = 0x200;
+
+        cpu.compare(&AddressingMode::Immediate, 0x80);
+        assert!(cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.pc = 0x200;
+        cpu.compare(&AddressingMode::Immediate, 0x70);
+        assert!(!cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.pc = 0x200;
+        cpu.compare(&AddressingMode::Immediate, 0x90);
+        assert!(cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_bit() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0b1001_0000;
+        cpu.memory[0x200] = 0b1101_0001;
+        cpu.pc = 0x200;
+        cpu.bit(&AddressingMode::Immediate);
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(cpu.status.is_flag_set(StatusFlag::OVERFLOW));
+        assert!(cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+
+        cpu.registers.a = 0b1001_0000;
+        cpu.memory[0x200] = 0b0010_0101;
+        cpu.pc = 0x200;
+        cpu.bit(&AddressingMode::Immediate);
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::OVERFLOW));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+    }
+
+    #[test]
+    fn test_add_to_accumulator_without_carry() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0x20;
+        cpu.add_to_accumulator(0x10);
+        assert_eq!(cpu.registers.a, 0x30);
+        assert!(!cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+        assert!(!cpu.status.is_flag_set(StatusFlag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_add_to_accumulator_with_carry() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0x90;
+        cpu.add_to_accumulator(0x90);
+        assert_eq!(cpu.registers.a, 0x20);
+        assert!(cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+        assert!(cpu.status.is_flag_set(StatusFlag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_add_to_accumulator_with_overflow() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0x50;
+        cpu.add_to_accumulator(0x50);
+        assert_eq!(cpu.registers.a, 0xA0);
+        assert!(!cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+        assert!(cpu.status.is_flag_set(StatusFlag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_add_to_accumulator_result_zero() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 0x80;
+        cpu.add_to_accumulator(0x80);
+        assert_eq!(cpu.registers.a, 0x0);
+        assert!(cpu.status.is_flag_set(StatusFlag::CARRY));
+        assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
+        assert!(!cpu.status.is_flag_set(StatusFlag::NEGATIVE));
+        assert!(cpu.status.is_flag_set(StatusFlag::OVERFLOW));
+    }
+
+    #[test]
+    fn test_adc() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 20;
+        cpu.memory[0x200] = 30;
+        cpu.pc = 0x200;
+        cpu.adc(&AddressingMode::Immediate);
+
+        assert_eq!(cpu.registers.a, 50);
+    }
+
+    #[test]
+    fn test_adc_with_carry() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 130;
+        cpu.memory[0x200] = 130;
+        cpu.pc = 0x200;
+
+        cpu.status.set_flag(StatusFlag::CARRY);
+        cpu.adc(&AddressingMode::Immediate);
+        assert_eq!(cpu.registers.a, (260 % 255) as u8);
+    }
+
+    #[test]
+    fn test_sbc() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 100;
+        cpu.memory[0x200] = 30;
+        cpu.pc = 0x200;
+
+        cpu.sbc(&AddressingMode::Immediate);
+        assert_eq!(cpu.registers.a, 71);
+    }
+
+    #[test]
+    fn test_sbc_with_borrow() {
+        let mut cpu = CPU::new();
+        cpu.registers.a = 30;
+        cpu.memory[0x200] = 100;
+        cpu.pc = 0x200;
+
+        cpu.sbc(&AddressingMode::Immediate);
+        assert_eq!(cpu.registers.a, (70_i8.wrapping_neg() + 1) as u8);
+    }
+
+    #[test]
+    fn test_smoke_tests() {
+        
     }
 }
