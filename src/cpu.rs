@@ -84,6 +84,8 @@ struct Registers {
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
 
+const RESET_VECTOR: u16 = 0xFFFC;
+
 impl Registers {
     pub fn new() -> Self {
         Registers {
@@ -396,12 +398,31 @@ impl CPU {
     pub fn reset(&mut self) {
         self.registers = Registers::new();
         self.status = Status::new();
-        self.pc = self.mem_read_u16(0xFFFC);
+        self.pc = self.mem_read_u16(RESET_VECTOR);
     }
 
-    pub fn load_program(&mut self, program: Vec<u8>) {
+    // TODO: Do we need a mode here?
+    pub fn load_program(&mut self, program: Vec<u8>, reset_vector: bool) {
         self.memory[0x8000 .. (0x8000 + program.len())].copy_from_slice(&program[..]);
-        self.mem_write_u16(0xFFFC, 0x8000);
+
+        if reset_vector {
+            self.mem_write_u16(RESET_VECTOR, 0x8000);
+        }
+
+        self.reset();
+    }
+
+    // TODO: Need to read more about the memory layout here.
+    pub fn load_image(&mut self, program: Vec<u8>, reset_vector: bool) {
+        // TODO: Fix
+        for i in 0..(program.len() as u16) {
+            self.mem_write(i, program[i as usize]);
+        }
+
+        if reset_vector {
+            self.mem_write_u16(RESET_VECTOR, 0x8000);
+        }
+
         self.reset();
     }
 
@@ -560,6 +581,9 @@ impl CPU {
 
 #[cfg(test)]
 mod test {
+    use std::fs::File;
+    use std::{io, panic};
+    use std::io::Read;
     use super::*;
 
     #[test]
@@ -738,7 +762,7 @@ mod test {
 
         for typ in test_cases {
             let mut cpu = CPU::new();
-            cpu.load_program(vec![0x05, 0x00]);
+            cpu.load_program(vec![0x05, 0x00], true);
             cpu.ld_(&AddressingMode::Immediate, typ);
 
             assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
@@ -756,7 +780,7 @@ mod test {
     #[test]
     fn test_0xa9_lda_immediate_load_data() {
         let mut cpu = CPU::new();
-        cpu.load_program(vec![0xa9, 0x05, 0x00]);
+        cpu.load_program(vec![0xa9, 0x05, 0x00], true);
         cpu.run();
         assert_eq!(cpu.registers.a, 0x05);
         assert!(!cpu.status.is_flag_set(StatusFlag::ZERO));
@@ -766,7 +790,7 @@ mod test {
     #[test]
     fn test_0xa9_lda_zero_flag() {
         let mut cpu = CPU::new();
-        cpu.load_program(vec![0xa9, 0x00, 0x00]);
+        cpu.load_program(vec![0xa9, 0x00, 0x00], true);
         cpu.run();
         assert!(cpu.status.is_flag_set(StatusFlag::ZERO));
     }
@@ -775,7 +799,7 @@ mod test {
     #[should_panic]
     fn test_ld_incorrect_opcode() {
         let mut cpu = CPU::new();
-        cpu.load_program(vec![0x05, 0x00]);
+        cpu.load_program(vec![0x05, 0x00], true);
         cpu.ld_(&AddressingMode::Immediate, &OpCodeType::ORA);
     }
 
@@ -1095,8 +1119,52 @@ mod test {
         assert_eq!(cpu.registers.a, (70_i8.wrapping_neg() + 1) as u8);
     }
 
+    fn read_rom(path: &str) -> io::Result<Vec<u8>> {
+        let mut file = File::open(path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn test_rom(path: &str) {
+        let image = read_rom(path).unwrap();
+        let mut cpu = CPU::new();
+        cpu.load_image(image, false);
+        cpu.run();
+
+        // TODO: Print result
+
+        let mut end = 0x6004;
+        while cpu.memory[end] != 0x00 {
+            end += 1;
+        }
+
+        println!("{:?}", cpu.memory[0x6001..0x6003].to_vec());
+
+        let error = String::from_utf8(cpu.memory[0x6004..end].to_vec()).expect("Could not decipher error message");
+
+        println!("{}, {}", cpu.memory[0x6000], error);
+    }
+
+    // TODO: Probably separate this into integration tests?
     #[test]
-    fn test_smoke_tests() {
-        
+    fn test_basics_rom() {
+        test_rom("test/01-basics.nes")
+    }
+
+    fn test_implied_rom() {
+
+    }
+
+    fn test_immediate_rom() {
+
+    }
+
+    fn test_zero_page_rom() {
+
+    }
+
+    fn test_zp_xy_rom() {
+
     }
 }
