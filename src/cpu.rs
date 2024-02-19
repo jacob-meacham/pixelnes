@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::Add;
 use crate::opcodes::{OpCode, OpCodeType, OPCODES};
 
 // TODO: Should functions be responsible for consuming their operand? More state in the functions then
@@ -184,7 +185,7 @@ impl CPU {
         hi << 8 | lo
     }
 
-    fn consume_address(&mut self, mode: &AddressingMode) -> u16 {
+    fn consume_and_map_argument(&mut self, mode: &AddressingMode) -> u16 {
         match mode {
             AddressingMode::Immediate => {
                 let val = self.pc;
@@ -235,7 +236,7 @@ impl CPU {
     }
 
     fn ld_(&mut self, mode: &AddressingMode, opcode_type: &OpCodeType) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let value = self.mem_read(addr);
 
         let r = match opcode_type {
@@ -250,12 +251,12 @@ impl CPU {
     }
 
     fn st_(&mut self, val: u8, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         self.mem_write(addr, val);
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr).wrapping_add(1);
         self.mem_write(addr, val);
 
@@ -275,11 +276,16 @@ impl CPU {
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr).wrapping_sub(1);
         self.mem_write(addr, val);
 
         self.set_zero_negative_flags(val)
+        if data <= self.register_a {
+            self.status.insert(CpuFlags::CARRY);
+        }
+
+        self.update_zero_and_negative_flags(self.register_a.wrapping_sub(data));
     }
 
     fn de_(&mut self, opcode_type: &OpCodeType) {
@@ -295,23 +301,114 @@ impl CPU {
     }
 
     fn ora(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr);
 
         self.registers.a |= val;
         self.set_zero_negative_flags(self.registers.a);
     }
 
-    fn and(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
-        let val = self.mem_read(addr);
-
+    fn and_acc_with_value(&mut self, val: u8) {
         self.registers.a &= val;
         self.set_zero_negative_flags(self.registers.a);
     }
 
+    fn and(&mut self, mode: &AddressingMode) {
+        let addr = self.consume_and_map_argument(&mode);
+        let val = self.mem_read(addr);
+
+        self.and_acc_with_value(val);
+    }
+
+    fn aac(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+
+        if self.status.is_flag_set(StatusFlag::NEGATIVE) {
+            self.status.set_flag(StatusFlag::CARRY)
+        }
+    }
+
+    fn aax(&mut self, mode: &AddressingMode) {
+        let addr = self.consume_and_map_argument(&mode);
+
+        self.and_acc_with_value(self.registers.x);
+        self.mem_write(addr, self.registers.a);
+    }
+
+    fn arr(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+
+        self.registers.a = self.registers.a >> 1 |     self.registers.a << 7;
+        match (self.registers.a & 0b0010_0000 != 0, self.registers.a & 0b0100_0000 != 0) {
+            (true, true) => {
+                self.status.set_flag(StatusFlag::CARRY);
+                self.status.clear_flag(StatusFlag::OVERFLOW);
+            }
+            (false, false) => {
+                self.status.clear_flag(StatusFlag::CARRY);
+                self.status.clear_flag(StatusFlag::OVERFLOW);
+            }
+            (true, false) => {
+                self.status.clear_flag(StatusFlag::CARRY);
+                self.status.set_flag(StatusFlag::OVERFLOW);
+            }
+            (false, true) => {
+                self.status.set_flag(StatusFlag::CARRY);
+                self.status.set_flag(StatusFlag::OVERFLOW);
+            }
+        }
+    }
+
+    fn asr(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+        self.shift_operation(&AddressingMode::Accumulator, |val: u8, _: &Status| {
+            return (val >> 1, val & 1 == 1);
+        })
+    }
+
+    fn atx(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+
+        self.registers.x = self.registers.a;
+        self.set_zero_negative_flags(self.registers.x);
+    }
+
+    fn axa(&mut self, mode: &AddressingMode) {
+        let addr = self.consume_and_map_argument(&mode);
+
+        self.and_acc_with_value(self.registers.x);
+        let val = self.registers.a & 0x07;
+
+        self.mem_write(addr, val);
+    }
+
+    fn axs(&mut self, mode: &AddressingMode) {
+        let addr = self.consume_and_map_argument(&mode);
+        let byt = self.mem_read(addr);
+
+        let val = self.registers.a & self.registers.x;
+        self.registers.x = val.wrapping_sub(byt);
+
+        if self.registers.x <= val {
+            self.status.set_flag(StatusFlag::CARRY);
+        }
+
+        self.set_zero_negative_flags(self.registers.x);
+    }
+
+    fn dcp(&mut self, mode: &AddressingMode) {
+        let addr = self.consume_and_map_argument(&mode);
+        let val = self.mem_read(addr);
+        let result = val.wrapping_sub(1);
+        if result <= val {
+            self.status.set_flag(StatusFlag::CARRY);
+        }
+
+        self.mem_write(addr, result);
+    }
+
     fn eor(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr);
 
         self.registers.a ^= val;
@@ -320,7 +417,7 @@ impl CPU {
 
     fn shift_operation(&mut self, mode: &AddressingMode, op:fn(u8, &Status) -> (u8, bool)) {
         let (val, addr) = if mode == &AddressingMode::Accumulator { (self.registers.a, None) } else {
-            let addr = self.consume_address(&mode);
+            let addr = self.consume_and_map_argument(&mode);
             (self.mem_read(addr), Some(addr))
         };
 
@@ -345,7 +442,7 @@ impl CPU {
     }
 
     fn compare(&mut self, mode: &AddressingMode, compare_val: u8) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr);
         self.status.update_flag(compare_val >= val, StatusFlag::CARRY);
 
@@ -353,7 +450,7 @@ impl CPU {
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr);
 
         self.status.update_flag(self.registers.a & val == 0, StatusFlag::ZERO);
@@ -382,14 +479,14 @@ impl CPU {
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr);
 
         self.add_to_accumulator(val);
     }
 
     fn sbc(&mut self, mode: &AddressingMode) {
-        let addr = self.consume_address(&mode);
+        let addr = self.consume_and_map_argument(&mode);
         let val = self.mem_read(addr) as i8;
 
         self.add_to_accumulator(val.wrapping_neg().wrapping_add(1) as u8);
@@ -451,12 +548,13 @@ impl CPU {
             OpCodeType::STA => self.st_(self.registers.a, &opcode.mode),
             OpCodeType::STX => self.st_(self.registers.x, &opcode.mode),
             OpCodeType::STY => self.st_(self.registers.y, &opcode.mode),
+
+            // Transfer operations
             OpCodeType::TAX => {
-                self.registers.x = self.registers.y;
+                self.registers.x = self.registers.a;
                 self.set_zero_negative_flags(self.registers.x);
             }
 
-            // Transfer operations
             OpCodeType::TAY => {
                 self.registers.y = self.registers.a;
                 self.set_zero_negative_flags(self.registers.y);
@@ -541,11 +639,11 @@ impl CPU {
 
             // Jump operations
             OpCodeType::JMP => {
-                let addr = self.consume_address(&opcode.mode);
+                let addr = self.consume_and_map_argument(&opcode.mode);
                 self.pc = addr
             }
             OpCodeType::JSR => {
-                let addr = self.consume_address(&opcode.mode);
+                let addr = self.consume_and_map_argument(&opcode.mode);
                 self.stack_push_u16(self.pc.wrapping_sub(1));
                 self.pc = addr
             }
@@ -568,12 +666,19 @@ impl CPU {
             // Misc operations
             OpCodeType::BIT => self.bit(&opcode.mode),
 
+            // Illegal combined operations
+            OpCodeType::AAC => self.aac(&opcode.mode),
+
             // Special
             OpCodeType::BRK => {
                 self.halt_requested = true;
             }
             OpCodeType::NOP => {
                 // Do nothing
+            }
+            OpCodeType::DOP | OpCodeType::TOP => {
+                // Consume argument and do nothing
+                self.consume_and_map_argument(&opcode.mode);
             }
         }
     }
@@ -635,7 +740,7 @@ mod test {
     fn test_consume_address_immediate() {
         let mut cpu = CPU::new();
         cpu.pc = 0x400;
-        let addr = cpu.consume_address(&AddressingMode::Immediate);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::Immediate);
         assert_eq!(addr, 0x400);
         assert_eq!(cpu.pc, 0x401);
     }
@@ -645,7 +750,7 @@ mod test {
         let mut cpu = CPU::new();
         cpu.pc = 0x400;
         cpu.memory[0x400] = 0x10;
-        let addr = cpu.consume_address(&AddressingMode::ZeroPage);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::ZeroPage);
 
         assert_eq!(addr, 0x10);
         assert_eq!(cpu.pc, 0x401);
@@ -658,7 +763,7 @@ mod test {
         cpu.memory[0x400] = 0x10;
         cpu.registers.x = 0x05;
 
-        let addr = cpu.consume_address(&AddressingMode::ZeroPageX);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::ZeroPageX);
         assert_eq!(addr, 0x15);
         assert_eq!(cpu.pc, 0x401);
     }
@@ -670,7 +775,7 @@ mod test {
         cpu.memory[0x400] = 0x10;
         cpu.registers.y = 0x07;
 
-        let addr = cpu.consume_address(&AddressingMode::ZeroPageY);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::ZeroPageY);
         assert_eq!(addr, 0x17);
         assert_eq!(cpu.pc, 0x401);
     }
@@ -682,7 +787,7 @@ mod test {
         cpu.memory[0x400] = 0x10;
         cpu.memory[0x401] = 0x2a;
 
-        let addr = cpu.consume_address(&AddressingMode::Absolute);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::Absolute);
         assert_eq!(addr, 0x2a10);
         assert_eq!(cpu.pc, 0x402);
     }
@@ -695,7 +800,7 @@ mod test {
         cpu.memory[0x401] = 0x2a;
         cpu.registers.x = 0x05;
 
-        let addr = cpu.consume_address(&AddressingMode::AbsoluteX);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::AbsoluteX);
         assert_eq!(addr, 0x2a15);
         assert_eq!(cpu.pc, 0x402);
     }
@@ -708,7 +813,7 @@ mod test {
         cpu.memory[0x401] = 0x2a;
         cpu.registers.y = 0x07;
 
-        let addr = cpu.consume_address(&AddressingMode::AbsoluteY);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::AbsoluteY);
         assert_eq!(addr, 0x2a17);
         assert_eq!(cpu.pc, 0x402);
     }
@@ -720,7 +825,7 @@ mod test {
         cpu.mem_write_u16(0x400, 0x102a);
         cpu.mem_write_u16(0x102a, 0xf11a);
 
-        let addr = cpu.consume_address(&AddressingMode::Indirect);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::Indirect);
         assert_eq!(addr, 0xf11a);
         assert_eq!(cpu.pc, 0x402);
     }
@@ -733,7 +838,7 @@ mod test {
         cpu.memory[0x400] = 0x2a;
         cpu.mem_write_u16(0x2a + 0x11, 0xfaff);
 
-        let addr = cpu.consume_address(&AddressingMode::IndexedIndirect);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::IndexedIndirect);
         assert_eq!(addr, 0xfaff);
         assert_eq!(cpu.pc, 0x401);
     }
@@ -746,7 +851,7 @@ mod test {
         cpu.memory[0x400] = 0x2a;
         cpu.mem_write_u16(0x2a, 0xfaff);
 
-        let addr = cpu.consume_address(&AddressingMode::IndirectIndexed);
+        let addr = cpu.consume_and_map_argument(&AddressingMode::IndirectIndexed);
         assert_eq!(addr, 0xfaff + 0x11);
         assert_eq!(cpu.pc, 0x401);
     }
@@ -1131,8 +1236,6 @@ mod test {
         let mut cpu = CPU::new();
         cpu.load_image(image, false);
         cpu.run();
-
-        // TODO: Print result
 
         let mut end = 0x6004;
         while cpu.memory[end] != 0x00 {
