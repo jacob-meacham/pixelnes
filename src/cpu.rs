@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::num::Add;
 use crate::opcodes::{OpCode, OpCodeType, OPCODES};
 
 // TODO: Should functions be responsible for consuming their operand? More state in the functions then
@@ -280,12 +279,7 @@ impl CPU {
         let val = self.mem_read(addr).wrapping_sub(1);
         self.mem_write(addr, val);
 
-        self.set_zero_negative_flags(val)
-        if data <= self.register_a {
-            self.status.insert(CpuFlags::CARRY);
-        }
-
-        self.update_zero_and_negative_flags(self.register_a.wrapping_sub(data));
+        self.set_zero_negative_flags(val);
     }
 
     fn de_(&mut self, opcode_type: &OpCodeType) {
